@@ -796,6 +796,7 @@ class ProxyAppTests(unittest.IsolatedAsyncioTestCase):
                     headers={"x-codex-turn-metadata": metadata},
                     json={"model": "gpt-test", "input": "again"},
                 )
+                history = await client.get("/control/api/requests")
             finally:
                 await client.aclose()
                 await upstream_client.aclose()
@@ -808,6 +809,72 @@ class ProxyAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["model"], "gpt-test")
         self.assertEqual(item["total_tokens"], 6)
         self.assertNotIn(thread_id, requests.text)
+        self.assertEqual(
+            [entry["provider_name"] for entry in history.json()["items"]],
+            ["Second", "First"],
+        )
+        self.assertEqual(
+            {entry["route_provider_id"] for entry in history.json()["items"]},
+            {"second"},
+        )
+
+    async def test_sessions_api_lists_active_recent_sessions_without_thread_ids(self) -> None:
+        active_thread = "thread-active"
+        recent_thread = "thread-recent"
+        catalog_since: list[float] = []
+        now = time.time()
+
+        def session_catalog(since: float):
+            catalog_since.append(since)
+            return (
+                {
+                    "thread_id": recent_thread,
+                    "name": "最近会话",
+                    "updated_at": now - 3600,
+                },
+            )
+
+        router = ProviderRouter((provider("first", current=True), provider("second")))
+        router.set_session_provider_override(active_thread, "second")
+        active_request = router.begin_request(thread_id=active_thread)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            usage_store = UsageStore(Path(temp_dir) / "usage.sqlite3")
+            upstream_client = httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: httpx.Response(200))
+            )
+            app = create_proxy_app(
+                router,
+                client=upstream_client,
+                usage_store=usage_store,
+                session_name_resolver=lambda requested: {
+                    item: "当前活动会话" for item in requested if item == active_thread
+                },
+                session_catalog=session_catalog,
+            )
+            client = httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+            )
+            try:
+                response = await client.get("/control/api/sessions")
+            finally:
+                await client.aclose()
+                await upstream_client.aclose()
+                router.finish_request(active_request, status_code=200)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["window_days"], 7)
+        self.assertGreaterEqual(catalog_since[0], now - 7 * 24 * 3600 - 2)
+        self.assertEqual(
+            [item["name"] for item in payload["items"]],
+            ["当前活动会话", "最近会话"],
+        )
+        self.assertTrue(payload["items"][0]["active"])
+        self.assertEqual(payload["items"][0]["route_provider_id"], "second")
+        self.assertTrue(all(len(item["session_key"]) == 24 for item in payload["items"]))
+        self.assertNotIn(active_thread, response.text)
+        self.assertNotIn(recent_thread, response.text)
 
     async def test_protocol_adapter_replaces_claude_placeholder_auth(self) -> None:
         seen: list[httpx.Request] = []
@@ -2480,8 +2547,11 @@ class ProxyAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="runtime-data-directory"', page.text)
         self.assertIn('id="usage-total"', page.text)
         self.assertIn("Token 用量", page.text)
-        self.assertIn("styles.css?v=20", page.text)
-        self.assertIn("app.js?v=23", page.text)
+        self.assertIn("styles.css?v=22", page.text)
+        self.assertIn("app.js?v=26", page.text)
+        self.assertIn("<span>请求</span><span>服务器检测</span>", page.text)
+        self.assertIn("供应商", page.text)
+        self.assertIn("设置会话路由", page.text)
         self.assertIn('id="active-sessions-popover"', page.text)
         self.assertIn('id="usage-history-popover"', page.text)
         self.assertIn('id="recovery-history-meta"', page.text)
@@ -2535,7 +2605,8 @@ class ProxyAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(".provider-health-detail", styles.text)
         self.assertIn(".provider-health-popover", styles.text)
         self.assertIn(".history-detail-popover", styles.text)
-        self.assertIn("minmax(190px, 240px)", styles.text)
+        self.assertIn("minmax(160px, 250px)", styles.text)
+        self.assertIn("minmax(260px, 1fr)", styles.text)
         self.assertIn(".drag-handle", styles.text)
         self.assertIn(".hidden-provider", styles.text)
         self.assertNotIn("-webkit-line-clamp: 2", styles.text)

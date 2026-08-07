@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 import threading
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,7 @@ from local_proxy.core import (
     _forward_request,
     _public_control_status,
     _public_requests,
+    _public_sessions,
     _valid_control_request,
     order_proxy_providers,
     retry_policy_from_mapping,
@@ -98,6 +100,8 @@ class ProxyProfile:
     provider_selectable: Callable[[ProxyProvider], bool] | None = None
     provider_public_fields: Callable[[ProxyProvider], Mapping[str, Any]] | None = None
     session_name_resolver: Callable[[Iterable[str]], Mapping[str, str]] | None = None
+    session_catalog: Callable[[float], Iterable[Mapping[str, Any]]] | None = None
+    session_key_resolver: Callable[[str], str | None] | None = None
     config_endpoint_name: str = "config"
     owns_client: bool = True
     retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
@@ -361,6 +365,20 @@ def _register_control_routes(
             return JSONResponse(status_code=503, content={"detail": "无法读取本地请求记录"})
         return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
 
+    async def control_sessions():
+        if profile.session_catalog is None:
+            return JSONResponse(status_code=503, content={"detail": "会话路由功能不可用"})
+        try:
+            sessions = profile.session_catalog(time.time() - 7 * 24 * 3600)
+            payload = _public_sessions(
+                profile.router,
+                sessions,
+                session_name_resolver=profile.session_name_resolver,
+            )
+        except (OSError, TypeError, ValueError):
+            return JSONResponse(status_code=503, content={"detail": "无法读取 Codex 会话列表"})
+        return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
+
     async def control_session_route(session_key: str, request: Request):
         if not _valid_control_request(request):
             return JSONResponse(status_code=403, content={"detail": "Forbidden"})
@@ -378,6 +396,8 @@ def _register_control_routes(
         thread_id = profile.router.thread_id_for_session_key(session_key)
         if thread_id is None:
             thread_id = profile.usage_store.thread_id_for_session_key(session_key)
+        if thread_id is None and profile.session_key_resolver is not None:
+            thread_id = profile.session_key_resolver(session_key)
         if thread_id is None:
             return JSONResponse(status_code=404, content={"detail": "未找到该会话"})
         if provider_id is not None:
@@ -577,6 +597,7 @@ def _register_control_routes(
     app.add_api_route(f"{prefix}/api/recovery-history", control_recovery_history, methods=["GET"], include_in_schema=False)
     app.add_api_route(f"{prefix}/api/usage-history", control_usage_history, methods=["GET"], include_in_schema=False)
     app.add_api_route(f"{prefix}/api/requests", control_requests, methods=["GET"], include_in_schema=False)
+    app.add_api_route(f"{prefix}/api/sessions", control_sessions, methods=["GET"], include_in_schema=False)
     app.add_api_route(
         f"{prefix}/api/session-routes/{{session_key}}",
         control_session_route,

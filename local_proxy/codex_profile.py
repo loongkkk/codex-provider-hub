@@ -214,5 +214,7 @@ def build_codex_profile(
         runtime_metadata=runtime_metadata,
         ui_config=lambda: codex_ui_config(port, root),
         session_name_resolver=session_name_index.resolve,
+        session_catalog=session_name_index.recent,
+        session_key_resolver=session_name_index.thread_id_for_session_key,
         config_endpoint_name="codex-config",
     )

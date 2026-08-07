@@ -1744,6 +1744,8 @@ def create_proxy_app(
     provider_selectable: Callable[[ProxyProvider], bool] | None = None,
     provider_public_fields: Callable[[ProxyProvider], Mapping[str, Any]] | None = None,
     session_name_resolver: Callable[[Iterable[str]], Mapping[str, str]] | None = None,
+    session_catalog: Callable[[float], Iterable[Mapping[str, Any]]] | None = None,
+    session_key_resolver: Callable[[str], str | None] | None = None,
     config_endpoint_name: str = "codex-config",
     codex_profile: Any | None = None,
     claude_profile: Any | None = None,
@@ -1949,6 +1951,20 @@ def create_proxy_app(
             return JSONResponse(status_code=503, content={"detail": "无法读取本地请求记录"})
         return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
 
+    @app.get("/control/api/sessions", include_in_schema=False)
+    async def control_sessions():
+        if session_catalog is None:
+            return JSONResponse(status_code=503, content={"detail": "会话路由功能不可用"})
+        try:
+            payload = _public_sessions(
+                router,
+                session_catalog(time.time() - 7 * 24 * 3600),
+                session_name_resolver=session_name_resolver,
+            )
+        except (OSError, TypeError, ValueError):
+            return JSONResponse(status_code=503, content={"detail": "无法读取 Codex 会话列表"})
+        return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
+
     @app.post("/control/api/session-routes/{session_key}", include_in_schema=False)
     async def control_session_route(session_key: str, request: Request):
         if not _valid_control_request(request):
@@ -1965,6 +1981,8 @@ def create_proxy_app(
         thread_id = router.thread_id_for_session_key(session_key)
         if thread_id is None:
             thread_id = usage_store.thread_id_for_session_key(session_key)
+        if thread_id is None and session_key_resolver is not None:
+            thread_id = session_key_resolver(session_key)
         if thread_id is None:
             return JSONResponse(status_code=404, content={"detail": "未找到该会话"})
         if provider_id is not None:
@@ -2463,6 +2481,88 @@ def _public_requests(
         "items": items,
         "next_cursor": history["next_cursor"],
         "total_count": len(active) + int(history["total_count"]),
+    }
+
+
+def _public_sessions(
+    router: ProviderRouter,
+    sessions: Iterable[Mapping[str, Any]],
+    *,
+    session_name_resolver: Callable[[Iterable[str]], Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
+    indexed: dict[str, dict[str, Any]] = {}
+    for raw in sessions:
+        if not isinstance(raw, Mapping):
+            continue
+        thread_id = raw.get("thread_id")
+        name = raw.get("name")
+        updated_at = raw.get("updated_at")
+        if not isinstance(thread_id, str) or not thread_id:
+            continue
+        if not isinstance(name, str) or not name.strip():
+            name = "未知会话"
+        try:
+            timestamp = float(updated_at)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(timestamp):
+            continue
+        indexed[thread_id] = {
+            "thread_id": thread_id,
+            "name": name.strip(),
+            "updated_at": timestamp,
+            "active_requests": 0,
+        }
+
+    status = router.status()
+    active_thread_ids = {
+        detail.thread_id
+        for detail in status.active_request_details
+        if detail.thread_id is not None
+    }
+    resolved_names: Mapping[str, str] = {}
+    if session_name_resolver is not None and active_thread_ids:
+        try:
+            resolved_names = session_name_resolver(active_thread_ids)
+        except (OSError, TypeError, ValueError):
+            resolved_names = {}
+    for detail in status.active_request_details:
+        if detail.thread_id is None:
+            continue
+        entry = indexed.setdefault(
+            detail.thread_id,
+            {
+                "thread_id": detail.thread_id,
+                "name": resolved_names.get(detail.thread_id, "未知会话"),
+                "updated_at": detail.started_wall_at,
+                "active_requests": 0,
+            },
+        )
+        entry["updated_at"] = max(float(entry["updated_at"]), detail.started_wall_at)
+        entry["active_requests"] = int(entry["active_requests"]) + 1
+
+    items = [
+        {
+            "session_key": _session_key(entry["thread_id"]),
+            "name": entry["name"],
+            "updated_at": round(float(entry["updated_at"]) * 1000),
+            "active": int(entry["active_requests"]) > 0,
+            "active_requests": int(entry["active_requests"]),
+            "route_provider_id": router.session_provider_override(entry["thread_id"]),
+        }
+        for entry in indexed.values()
+    ]
+    items.sort(
+        key=lambda item: (
+            not item["active"],
+            -int(item["updated_at"]),
+            str(item["name"]).casefold(),
+        )
+    )
+    return {
+        "window_days": 7,
+        "total_count": len(items),
+        "items": items[:500],
     }
 
 

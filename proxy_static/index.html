@@ -18,7 +18,7 @@
       document.documentElement.dataset.theme = dark ? "dark" : "light";
     })();
   </script>
-  <link rel="stylesheet" href="./static/styles.css?v=20">
+  <link rel="stylesheet" href="./static/styles.css?v=22">
 </head>
 <body>
   <main class="stage">
@@ -105,7 +105,7 @@
           </div>
           <div class="provider-list-shell">
             <div class="manage-hint" id="manage-hint" hidden>拖动左侧手柄调整顺序；搜索时暂停拖动。隐藏的供应商仅在管理模式显示。</div>
-            <div class="list-header" aria-hidden="true"><span>状态</span><span>名称和地址</span><span>服务器检测</span><span>Token 用量</span><span>认证</span></div>
+            <div class="list-header" aria-hidden="true"><span>状态</span><span>名称和地址</span><span>请求</span><span>服务器检测</span><span>Token 用量</span><span>认证</span></div>
             <div id="provider-list" class="provider-list" aria-live="polite"></div>
             <div id="empty-state" class="empty-state" hidden>没有匹配的供应商</div>
           </div>
@@ -145,7 +145,10 @@
             <h2 id="requests-title">请求记录</h2>
             <p id="requests-meta">保留最近 24 小时，正在运行的请求置顶显示</p>
           </div>
-          <button id="requests-refresh" class="icon-button" type="button" title="刷新请求记录" aria-label="刷新请求记录">↻</button>
+          <div class="requests-heading-actions">
+            <button id="session-route-settings" class="icon-button" type="button" title="设置会话路由" aria-label="设置会话路由" aria-controls="session-route-popover" aria-expanded="false" hidden>⚙</button>
+            <button id="requests-refresh" class="icon-button" type="button" title="刷新请求记录" aria-label="刷新请求记录">↻</button>
+          </div>
         </div>
         <div class="request-filters" aria-label="请求筛选">
           <label><span class="visually-hidden">时间范围</span><select id="request-window"><option value="1h">近 1 小时</option><option value="6h">近 6 小时</option><option value="24h" selected>近 24 小时</option></select></label>
@@ -154,7 +157,7 @@
           <label class="request-search"><span class="search-icon" aria-hidden="true">⌕</span><input id="request-query" type="search" placeholder="搜索会话、模型或错误" autocomplete="off"></label>
         </div>
         <div class="request-table-shell">
-          <div class="request-table-header" aria-hidden="true"><span>状态</span><span>开始时间</span><span>会话</span><span>供应商路由</span><span>模型</span><span>耗时</span><span>Token</span><span>结果</span></div>
+          <div class="request-table-header" aria-hidden="true"><span>状态</span><span>开始时间</span><span>会话</span><span>供应商</span><span>模型</span><span>耗时</span><span>Token</span><span>结果</span></div>
           <div id="request-list" class="request-list" aria-live="polite"></div>
           <div id="requests-empty" class="requests-empty" hidden>当前筛选范围内没有请求记录</div>
         </div>
@@ -294,7 +297,13 @@
   </div>
 
   <div id="provider-health-popover" class="provider-health-popover" role="dialog" aria-modal="false" aria-label="服务器检测详情"></div>
-  <div id="active-sessions-popover" class="active-sessions-popover" role="dialog" aria-modal="false" aria-label="活动会话"></div>
+  <div id="active-sessions-popover" class="active-sessions-popover" role="tooltip" aria-label="当前运行的会话"></div>
+  <div id="session-route-popover" class="session-route-popover" role="dialog" aria-modal="false" aria-label="设置会话路由" hidden>
+    <div class="session-route-heading"><strong>设置会话路由</strong><button id="session-route-close" class="usage-history-close" type="button" title="关闭会话路由设置" aria-label="关闭会话路由设置">×</button></div>
+    <label class="session-route-field"><span>会话</span><select id="session-route-session"><option value="">正在读取会话…</option></select></label>
+    <label class="session-route-field"><span>后续供应商</span><select id="session-route-provider" disabled><option value="">请先选择会话</option></select></label>
+    <p id="session-route-meta" class="session-route-meta">只显示最近 7 天的 Codex 会话，活跃会话优先。</p>
+  </div>
   <div id="usage-history-popover" class="usage-history-popover" role="dialog" aria-modal="false" aria-label="请求记录">
     <div class="usage-history-heading">
       <div><strong id="usage-history-title">请求记录</strong><span id="usage-history-meta"></span></div>
@@ -306,6 +315,6 @@
   </div>
   <div id="history-detail-popover" class="history-detail-popover" role="tooltip"></div>
 
-  <script src="./static/app.js?v=23" defer></script>
+  <script src="./static/app.js?v=26" defer></script>
 </body>
 </html>
