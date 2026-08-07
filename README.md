@@ -114,7 +114,31 @@ Apple Silicon（M 系列芯片）Mac 用户可以从 [GitHub Releases](https://g
 
 ### 从源码运行
 
-### 1. 创建 Python 环境
+源码运行提供两种平级方式，可按本机习惯任选其一。
+
+### 1. 使用 uv
+
+先安装 [uv](https://docs.astral.sh/uv/)，然后在仓库根目录执行：
+
+Windows PowerShell：
+
+```powershell
+uv venv --clear .venv
+uv pip install --python .venv\Scripts\python.exe -r requirements-status.txt
+uv run --python .venv\Scripts\python.exe local_proxy_app.py
+```
+
+macOS/Linux：
+
+```bash
+uv venv --clear .venv
+uv pip install --python .venv/bin/python -r requirements-status.txt
+uv run --python .venv/bin/python local_proxy_app.py
+```
+
+默认不会自动打开网页；如需在启动时同时打开两个控制台，可追加 `--open-browser`。
+
+### 2. 使用原生 Python venv
 
 Windows PowerShell：
 
